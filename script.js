@@ -225,9 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // Migrate legacy 1.8.0 geometries to modern 1.12.0 format
-            // Minecraft 1.21+ drops support for legacy geometries when min_engine_version is 1.21+
-            // We MUST structurally upgrade the geometry!
+            // 2. Migrate legacy 1.8.0 geometries to modern 1.12.0 format
             const legacyGeometryKeys = Object.keys(data).filter(key => key.startsWith("geometry."));
             if (legacyGeometryKeys.length > 0) {
                 const newGeometries = [];
@@ -237,12 +235,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         identifier: geoKey
                     };
                     
-                    // Map legacy texture dimensions
-                    if (oldGeo.texturewidth !== undefined) description.texture_width = oldGeo.texturewidth;
-                    else if (oldGeo.texture_width !== undefined) description.texture_width = oldGeo.texture_width;
-                    
-                    if (oldGeo.textureheight !== undefined) description.texture_height = oldGeo.textureheight;
-                    else if (oldGeo.texture_height !== undefined) description.texture_height = oldGeo.texture_height;
+                    // Map legacy texture dimensions safely
+                    description.texture_width = oldGeo.texturewidth || oldGeo.texture_width || 64;
+                    description.texture_height = oldGeo.textureheight || oldGeo.texture_height || 64;
                     
                     // Map visible bounds
                     if (oldGeo.visible_bounds_width !== undefined) description.visible_bounds_width = oldGeo.visible_bounds_width;
@@ -261,6 +256,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 data["minecraft:geometry"] = newGeometries;
                 data["format_version"] = "1.12.0";
                 modified = true;
+            }
+
+            // 3. Sanitize all geometries (modern or newly migrated) for strict 1.21+ validation
+            if (Array.isArray(data["minecraft:geometry"])) {
+                data["minecraft:geometry"].forEach(geo => {
+                    // Ensure texture dimensions exist
+                    if (geo.description) {
+                        if (geo.description.texture_width === undefined) geo.description.texture_width = 64;
+                        if (geo.description.texture_height === undefined) geo.description.texture_height = 64;
+                    }
+
+                    if (Array.isArray(geo.bones)) {
+                        geo.bones.forEach(bone => {
+                            if (Array.isArray(bone.cubes)) {
+                                bone.cubes.forEach(cube => {
+                                    // Fix missing uv (Tynker bug when adding new blocks)
+                                    if (cube.uv === undefined) {
+                                        cube.uv = [0, 0];
+                                        modified = true;
+                                    }
+                                    // Fix negative sizes (Tynker bug when dragging blocks inversely)
+                                    // Minecraft 1.21 strictly rejects geometries with negative sizes
+                                    if (Array.isArray(cube.size)) {
+                                        for (let i = 0; i < 3; i++) {
+                                            if (cube.size[i] < 0) {
+                                                if (Array.isArray(cube.origin)) {
+                                                    cube.origin[i] += cube.size[i];
+                                                }
+                                                cube.size[i] = Math.abs(cube.size[i]);
+                                                modified = true;
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
             }
 
             return modified ? JSON.stringify(data, null, 2) : jsonStr;
