@@ -391,15 +391,7 @@ const dropZone = document.getElementById('drop-zone');
 
                 data["minecraft:geometry"].forEach(geo => {
                     if (geo.description) {
-                        // 強制 Tynker 的貼圖尺寸至少為 64x64，避免原版的 64x32 導致下方貼圖被截斷拉伸
-                        if (geo.description.texture_width === undefined || geo.description.texture_width < 64) {
-                            geo.description.texture_width = 64;
-                            modified = true;
-                        }
-                        if (geo.description.texture_height === undefined || geo.description.texture_height < 64) {
-                            geo.description.texture_height = 64;
-                            modified = true;
-                        }
+                        // 移除無條件強制升級 64x64 的邏輯，避免對 Tynker 的長貼圖 (如 256x32) 造成壓縮
                     }
 
                     if (Array.isArray(geo.bones)) {
@@ -434,23 +426,12 @@ const dropZone = document.getElementById('drop-zone');
                                         cube.uv = [0, 0];
                                         modified = true;
                                     }
-
-                                    if (Array.isArray(cube.uv)) {
-                                        // [Tynker 貼圖裁切修復] 
-                                        // 如果發現方塊的 UV 位於被裁切的區域 (y >= 32)，強制把它映射回主頭部 [0, 0]，避免破圖拉伸。
-                                        // 由於這些區域的自訂貼圖已經被 Tynker 刪除，它們會顯示為空白綠色，這是無法避免的。
-                                        if (cube.uv[1] >= 32) {
-                                            cube.uv = [0, 0];
-                                            modified = true;
-                                        } else {
-                                            if (cube.uv[0] < 0) { cube.uv[0] = 0; modified = true; }
-                                            if (cube.uv[1] < 0) { cube.uv[1] = 0; modified = true; }
-                                        }
-                                    }
                                     
-                                    // 註：已徹底移除 Math.abs(cube.size) 以及 Per-Face UV 覆寫。
-                                    // Tynker 完全依賴負數尺寸 (例如 [-8, 8, 8]) 來將正面的臉孔映射到貼圖的特定位置 (例如側面)。
-                                    // Minecraft 1.12.0 完全支援這種負數尺寸，因此保留原始數據才能讓主頭部找回原本的臉！
+                                    // 註：已徹底移除所有 UV 覆寫、負數尺寸修改，以及 texture_width/height 的強制升級！
+                                    // 根據除錯圖片，Tynker 實際上會將新增的方塊貼圖「橫向」排列（例如產生一張 256x32 的寬貼圖），並且使用原始的負數尺寸。
+                                    // 我們之前強行把 texture_height 設為 64，導致 Minecraft 內部計算 UV 時，將所有 Y 座標的比例縮小了一半，
+                                    // 讓遊戲取樣到了圖片上半部的空白區域，這才是臉部消失的真正元凶！
+                                    // 現在我們 100% 原封不動地將 Tynker 的幾何與 UV 交給 Minecraft 解析。
                                 });
                             }
                         });
