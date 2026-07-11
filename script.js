@@ -168,8 +168,7 @@ const dropZone = document.getElementById('drop-zone');
                                 "description": {
                                     "identifier": `minecraft:${name}`,
                                     "materials": {
-                                        "default": name,
-                                        "alpha": "entity_alphatest"
+                                        "default": "entity_alphatest"
                                     },
                                     "textures": {
                                         "default": texturePath
@@ -372,8 +371,15 @@ const dropZone = document.getElementById('drop-zone');
 
                 data["minecraft:geometry"].forEach(geo => {
                     if (geo.description) {
-                        if (geo.description.texture_width === undefined) geo.description.texture_width = 64;
-                        if (geo.description.texture_height === undefined) geo.description.texture_height = 64;
+                        // 強制 Tynker 的貼圖尺寸至少為 64x64，避免原版的 64x32 導致下方貼圖被截斷拉伸
+                        if (geo.description.texture_width === undefined || geo.description.texture_width < 64) {
+                            geo.description.texture_width = 64;
+                            modified = true;
+                        }
+                        if (geo.description.texture_height === undefined || geo.description.texture_height < 64) {
+                            geo.description.texture_height = 64;
+                            modified = true;
+                        }
                     }
 
                     if (Array.isArray(geo.bones)) {
@@ -407,6 +413,10 @@ const dropZone = document.getElementById('drop-zone');
                                     if (cube.uv === undefined) {
                                         cube.uv = [0, 0];
                                         modified = true;
+                                    }
+                                    if (Array.isArray(cube.uv)) {
+                                        if (cube.uv[0] < 0) { cube.uv[0] = 0; modified = true; }
+                                        if (cube.uv[1] < 0) { cube.uv[1] = 0; modified = true; }
                                     }
                                     if (Array.isArray(cube.size)) {
                                         for (let i = 0; i < 3; i++) {
