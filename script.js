@@ -391,7 +391,13 @@ const dropZone = document.getElementById('drop-zone');
 
                 data["minecraft:geometry"].forEach(geo => {
                     if (geo.description) {
-                        // 移除無條件強制升級 64x64 的邏輯，避免對 Tynker 的長貼圖 (如 256x32) 造成壓縮
+                        // [終極破案] 
+                        // Tynker 匯出的模型缺少了 texture_width 和 texture_height 參數。
+                        // 如果不設定，Minecraft 會退回 16x16 導致全身嚴重拉伸破圖 (v2.7 的狀況)。
+                        // 如果錯誤地設定為 64x64，會導致垂直 UV 被壓縮 50%，取樣到錯誤的空白位置 (v2.4 臉不見的狀況)。
+                        // 苦力怕的標準且正確的貼圖尺寸是 64x32！
+                        geo.description.texture_width = geo.description.texture_width || 64;
+                        geo.description.texture_height = geo.description.texture_height || 32;
                     }
 
                     if (Array.isArray(geo.bones)) {
