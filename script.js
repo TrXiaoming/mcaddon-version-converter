@@ -100,6 +100,9 @@ const dropZone = document.getElementById('drop-zone');
 
             // Recursive function to process zip and nested zips
             async function processZip(currentZip) {
+                let foundClientEntity = false;
+                let foundGeometries = new Set();
+
                 const promises = [];
                 currentZip.forEach((relativePath, zipEntry) => {
                     if (!zipEntry.dir) {
@@ -120,8 +123,20 @@ const dropZone = document.getElementById('drop-zone');
                             });
                             promises.push(p);
                         } else if (relativePath.endsWith('.json')) {
-                            // Fix Tynker's broken entity JSON formatting
                             const p = zipEntry.async("string").then(content => {
+                                // 預先解析檢查是否存在 client_entity 與 geometry
+                                try {
+                                    const d = JSON.parse(content);
+                                    if (d["minecraft:client_entity"]) foundClientEntity = true;
+                                    if (d["minecraft:geometry"]) {
+                                        d["minecraft:geometry"].forEach(g => {
+                                            if (g.description && g.description.identifier) {
+                                                foundGeometries.add(g.description.identifier);
+                                            }
+                                        });
+                                    }
+                                } catch(e) {}
+
                                 const updatedContent = fixTynkerEntityFormat(content, versionStr);
                                 currentZip.file(relativePath, updatedContent);
                             });
@@ -130,6 +145,50 @@ const dropZone = document.getElementById('drop-zone');
                     }
                 });
                 await Promise.all(promises);
+
+                // [終極殺手鐧] 如果 Tynker 偷懶沒輸出 client_entity，原版遊戲會拒絕載入任何自訂模型。
+                // 我們必須強行幫它捏造一個完美的 client_entity！
+                if (foundGeometries.size > 0 && !foundClientEntity) {
+                    for (const geoId of foundGeometries) {
+                        if (geoId.endsWith(".v1.8")) continue; // 跳過我們自己產生的分身
+                        
+                        const name = geoId.replace("geometry.", "");
+                        let texturePath = `textures/entity/${name}/${name}`; // 預設路徑
+                        
+                        // 動態掃描 ZIP 內符合名稱的 PNG 圖片，精準對應貼圖！
+                        currentZip.forEach((relPath, entry) => {
+                            if (relPath.endsWith('.png') && relPath.toLowerCase().includes(name.toLowerCase())) {
+                                texturePath = relPath.replace('.png', '');
+                            }
+                        });
+
+                        const clientEntity = {
+                            "format_version": "1.10.0",
+                            "minecraft:client_entity": {
+                                "description": {
+                                    "identifier": `minecraft:${name}`,
+                                    "materials": {
+                                        "default": name,
+                                        "alpha": "entity_alphatest"
+                                    },
+                                    "textures": {
+                                        "default": texturePath
+                                    },
+                                    "geometry": {
+                                        "default": geoId
+                                    },
+                                    "render_controllers": [
+                                        `controller.render.${name}`
+                                    ]
+                                }
+                            }
+                        };
+                        currentZip.file(`entity/${name}_tynker_fix.json`, JSON.stringify(clientEntity, null, 2));
+                        if (typeof logDebug === "function") {
+                            logDebug(`-> 注入缺失的 client_entity: entity/${name}_tynker_fix.json`);
+                        }
+                    }
+                }
             }
 
             await processZip(loadedZip);
