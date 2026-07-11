@@ -1,5 +1,14 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const dropZone = document.getElementById('drop-zone');
+    
+function logDebug(msg) {
+    const logEl = document.getElementById('debug-log');
+    if (logEl) {
+        logEl.textContent += msg + '\n';
+    }
+    console.log(msg);
+}
+
+const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
     const convertBtn = document.getElementById('convert-btn');
     const targetVersionInput = document.getElementById('target-version');
@@ -180,21 +189,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 isResourcePack = manifest.modules.some(mod => mod.type === "resources");
             }
 
-            // Update header.min_engine_version
             if (manifest.header) {
                 if (isResourcePack) {
-                    // [終極解法] Tynker 的資源包 (Resource Pack) 充滿了舊版 1.8.0 的模型與渲染語法。
-                    // 如果我們把資源包的引擎版本升級到 1.21+，Minecraft 會啟動「嚴格模式」並徹底禁用舊版渲染，導致自訂模型完全失效。
-                    // 將資源包設定為 1.16.0，既能被新版教育版接受，又能觸發 Minecraft 的「舊版寬容解析器」，自動包容 Tynker 產生的錯誤模型！
                     manifest.header.min_engine_version = [1, 16, 0];
                 } else {
-                    // 行為包 (Behavior Pack) 必須升級到最新版，才能正確覆寫原版生物的 AI 與行為。
                     manifest.header.min_engine_version = targetVersionArray;
                 }
                 modified = true;
             }
             
-            // Modern Bedrock requires manifest format_version to be 2
+            // 強制提升版本號，避免 Minecraft 讀取到舊的快取導致更新無效
+            const patchVersion = Math.floor(Date.now() / 1000) % 10000;
+            if (manifest.header && Array.isArray(manifest.header.version)) {
+                manifest.header.version[2] = patchVersion;
+                modified = true;
+            }
+            if (manifest.modules && Array.isArray(manifest.modules)) {
+                manifest.modules.forEach(mod => {
+                    if (Array.isArray(mod.version)) {
+                        mod.version[2] = patchVersion;
+                    }
+                });
+                modified = true;
+            }
+            
             if (manifest.format_version !== 2) {
                 manifest.format_version = 2;
                 modified = true;
@@ -208,6 +226,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fixTynkerEntityFormat(jsonStr, versionStr) {
+        try {
+            let d = JSON.parse(jsonStr);
+            if (d["format_version"]) logDebug("  -> format_version: " + d["format_version"]);
+            if (d["minecraft:client_entity"] && d["minecraft:client_entity"].description) logDebug("  -> client_entity ID: " + d["minecraft:client_entity"].description.identifier);
+            if (d["minecraft:geometry"]) logDebug("  -> 現代 geometry ID: " + d["minecraft:geometry"].map(g => g.description && g.description.identifier).join(", "));
+            const legacyKeys = Object.keys(d).filter(k => k.startsWith("geometry."));
+            if (legacyKeys.length > 0) logDebug("  -> 舊版 geometry: " + legacyKeys.join(", "));
+        } catch(e) {}
+
         try {
             let data = JSON.parse(jsonStr);
             let modified = false;
@@ -231,7 +258,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // 2. Client Entity Fixes
-            // 確保 client_entity 至少為 1.10.0，避免在某些版本中舊版設定被捨棄
             if (data["minecraft:client_entity"]) {
                 if (!data["format_version"] || data["format_version"] === "1.8.0") {
                     data["format_version"] = "1.10.0"; 
@@ -239,7 +265,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // 3. Migrate legacy 1.8.0 geometries to modern 1.12.0 format
+            // 3. Migrate legacy geometries to modern 1.12.0 format
             const legacyGeometryKeys = Object.keys(data).filter(key => key.startsWith("geometry."));
             if (legacyGeometryKeys.length > 0) {
                 const newGeometries = [];
@@ -254,10 +280,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (oldGeo.visible_bounds_height !== undefined) description.visible_bounds_height = oldGeo.visible_bounds_height;
                     if (oldGeo.visible_bounds_offset !== undefined) description.visible_bounds_offset = oldGeo.visible_bounds_offset;
 
-                    newGeometries.push({
+                    const newGeo = {
                         description: description,
                         bones: oldGeo.bones || []
-                    });
+                    };
+                    newGeometries.push(newGeo);
+                    
+                    // [大絕招] 如果原版的 client_entity 發生退回，它會要求尋找 "geometry.xxx.v1.8"。
+                    // 我們自動複製一份帶有 .v1.8 後綴的模型，確保無論如何都能成功攔截並顯示！
+                    if (!geoKey.endsWith(".v1.8")) {
+                        const duplicateGeo = JSON.parse(JSON.stringify(newGeo));
+                        duplicateGeo.description.identifier = geoKey + ".v1.8";
+                        newGeometries.push(duplicateGeo);
+                    }
+                    
                     delete data[geoKey]; 
                 }
                 
@@ -266,7 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 modified = true;
             }
 
-            // 4. Sanitize all geometries (Fix Tynker's Add Block bugs)
+            // 4. Sanitize all geometries
             if (Array.isArray(data["minecraft:geometry"])) {
                 if (!data["format_version"]) {
                     data["format_version"] = "1.12.0";
@@ -280,7 +316,31 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     if (Array.isArray(geo.bones)) {
+                        // 確保骨架名稱不重複
+                        const seenBones = new Set();
+                        geo.bones.forEach((bone, index) => {
+                            if (!bone.name) {
+                                bone.name = "bone_" + index;
+                                modified = true;
+                            }
+                            let originalName = bone.name;
+                            let counter = 1;
+                            while (seenBones.has(bone.name)) {
+                                bone.name = originalName + "_" + counter;
+                                counter++;
+                                modified = true;
+                            }
+                            seenBones.add(bone.name);
+                        });
+                        
+                        // 移除無效的 parent
+                        const allBoneNames = new Set(geo.bones.map(b => b.name));
                         geo.bones.forEach(bone => {
+                            if (bone.parent && !allBoneNames.has(bone.parent)) {
+                                delete bone.parent;
+                                modified = true;
+                            }
+                            
                             if (Array.isArray(bone.cubes)) {
                                 bone.cubes.forEach(cube => {
                                     if (cube.uv === undefined) {
