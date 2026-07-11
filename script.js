@@ -415,23 +415,48 @@ const dropZone = document.getElementById('drop-zone');
                                         modified = true;
                                     }
 
-                                    if (Array.isArray(cube.uv)) {
-                                        // [Tynker 貼圖裁切修復] 
-                                        // Tynker 匯出時常會把高度超過 32 的貼圖裁切掉(因為原版苦力怕是 64x32)。
-                                        // 如果發現有方塊的 UV 位於被裁切的區域 (y >= 32)，強制把它映射回主頭部 [0, 0]，避免破圖拉伸。
-                                        if (cube.uv[1] >= 32) {
-                                            cube.uv = [0, 0];
-                                            modified = true;
-                                        } else {
-                                            if (cube.uv[0] < 0) { cube.uv[0] = 0; modified = true; }
-                                            if (cube.uv[1] < 0) { cube.uv[1] = 0; modified = true; }
+                                    // 檢查是否為被 Tynker 裁切掉的失效 UV 區域 (y >= 32)
+                                    let isOutOfBounds = false;
+                                    if (Array.isArray(cube.uv) && cube.uv[1] >= 32) {
+                                        isOutOfBounds = true;
+                                    } else if (typeof cube.uv === 'object' && !Array.isArray(cube.uv)) {
+                                        for (const face in cube.uv) {
+                                            if (cube.uv[face].uv && cube.uv[face].uv[1] >= 32) {
+                                                isOutOfBounds = true;
+                                                break;
+                                            }
                                         }
                                     }
+
+                                    if (isOutOfBounds) {
+                                        // [終極 Per-Face UV 復原大法]
+                                        // Tynker 搞丟了這些方塊的貼圖，且負數尺寸會導致傳統 [0,0] Box UV 的正反面顛倒。
+                                        // 我們直接寫死六個面的獨立 UV 座標，強行鎖定正面就是苦力怕的臉！
+                                        cube.uv = {
+                                            "up": { "uv": [8, 0], "uv_size": [8, 8] },
+                                            "down": { "uv": [16, 0], "uv_size": [8, 8] },
+                                            "east": { "uv": [0, 8], "uv_size": [8, 8] },    // 右側
+                                            "north": { "uv": [8, 8], "uv_size": [8, 8] },   // 正面 (臉)
+                                            "west": { "uv": [16, 8], "uv_size": [8, 8] },   // 左側
+                                            "south": { "uv": [24, 8], "uv_size": [8, 8] }   // 背面
+                                        };
+                                        modified = true;
+                                    } else if (Array.isArray(cube.uv)) {
+                                        if (cube.uv[0] < 0) { cube.uv[0] = 0; modified = true; }
+                                        if (cube.uv[1] < 0) { cube.uv[1] = 0; modified = true; }
+                                    }
                                     
-                                    // 註解：已移除 Math.abs(cube.size) 與 mirror 反轉！
-                                    // 原因：Tynker 極度依賴負數尺寸來進行貼圖的水平/垂直翻轉。
-                                    // 若強行轉為正數，會導致 UV 座標域錯位，進而取樣到黑色區域（這就是 v2.1 與 v2.2 黑面的元凶）。
-                                    // Minecraft 1.12.0 geometry 解析器完全支援負數尺寸，因此不應干涉。
+                                    if (Array.isArray(cube.size)) {
+                                        for (let i = 0; i < 3; i++) {
+                                            if (cube.size[i] < 0) {
+                                                if (Array.isArray(cube.origin)) {
+                                                    cube.origin[i] += cube.size[i];
+                                                }
+                                                cube.size[i] = Math.abs(cube.size[i]);
+                                                modified = true;
+                                            }
+                                        }
+                                    }
                                 });
                             }
                         });
