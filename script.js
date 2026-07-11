@@ -414,10 +414,21 @@ const dropZone = document.getElementById('drop-zone');
                                         cube.uv = [0, 0];
                                         modified = true;
                                     }
+                                    
+                                    // [智慧修復] 如果方塊屬於頭部 (head)，Tynker 匯出時常會把外加的頭部貼圖弄丟或超出邊界。
+                                    // 我們強制讓所有頭部方塊都映射到 [0, 0]（苦力怕原本的臉），這樣三個頭都會有完美的臉孔！
+                                    if (bone.name && bone.name.toLowerCase().includes("head")) {
+                                        if (Array.isArray(cube.uv) && (cube.uv[0] !== 0 || cube.uv[1] !== 0)) {
+                                            cube.uv = [0, 0];
+                                            modified = true;
+                                        }
+                                    }
+
                                     if (Array.isArray(cube.uv)) {
                                         if (cube.uv[0] < 0) { cube.uv[0] = 0; modified = true; }
                                         if (cube.uv[1] < 0) { cube.uv[1] = 0; modified = true; }
                                     }
+                                    
                                     if (Array.isArray(cube.size)) {
                                         for (let i = 0; i < 3; i++) {
                                             if (cube.size[i] < 0) {
@@ -425,6 +436,8 @@ const dropZone = document.getElementById('drop-zone');
                                                     cube.origin[i] += cube.size[i];
                                                 }
                                                 cube.size[i] = Math.abs(cube.size[i]);
+                                                // 尺寸反轉時，必須將貼圖做水平鏡像，否則貼圖方向會相反或出現黑面
+                                                cube.mirror = !cube.mirror;
                                                 modified = true;
                                             }
                                         }
