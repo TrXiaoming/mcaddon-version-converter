@@ -202,20 +202,27 @@ document.addEventListener('DOMContentLoaded', () => {
             let data = JSON.parse(jsonStr);
             let modified = false;
 
-            // Tynker bug: format_version is placed inside minecraft:entity instead of root
-            if (data["minecraft:entity"] && data["minecraft:entity"]["format_version"]) {
-                // Move it to root and update to a safe modern version (e.g., matching the target version)
-                // Minecraft 1.16+ strictly requires format_version at root for vanilla overrides
-                data["format_version"] = versionStr;
-                delete data["minecraft:entity"]["format_version"];
-                modified = true;
-            }
+            // Only apply format_version fixes to behavior pack entities.
+            // DO NOT touch geometry, animations, or client_entity files, as their schema strictly depends on format_version.
+            if (data["minecraft:entity"]) {
+                // Tynker bug: format_version is placed inside minecraft:entity instead of root
+                if (data["minecraft:entity"]["format_version"]) {
+                    data["format_version"] = versionStr;
+                    delete data["minecraft:entity"]["format_version"];
+                    modified = true;
+                }
 
-            // If it's already at root but extremely old (like 1.1.0 or 1.8.0), we update it to match the engine target
-            // so Minecraft doesn't reject it as a legacy override
-            if (data["format_version"] && data["format_version"] < "1.16.0") {
-                data["format_version"] = versionStr;
-                modified = true;
+                // If it's a behavior entity override and uses an old format, update it to the target version
+                // so Minecraft doesn't reject it as a legacy override
+                if (data["format_version"]) {
+                    const fv = data["format_version"];
+                    const parts = fv.split('.').map(Number);
+                    // Properly compare versions (e.g. 1.8.0 vs 1.16.0)
+                    if (parts.length >= 2 && (parts[0] < 1 || (parts[0] === 1 && parts[1] < 16))) {
+                        data["format_version"] = versionStr;
+                        modified = true;
+                    }
+                }
             }
 
             return modified ? JSON.stringify(data, null, 2) : jsonStr;
