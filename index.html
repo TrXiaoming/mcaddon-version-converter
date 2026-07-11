@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCAddon 版本轉換工具</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <div class="background">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+    <div class="container glass">
+        <header>
+            <h1>MCAddon 版本轉換器</h1>
+            <p>輕鬆讓 Tynker 的作品相容於 Minecraft Education Edition</p>
+        </header>
+
+        <main>
+            <div class="form-group">
+                <label for="target-version">目標 Minecraft 版本：</label>
+                <input type="text" id="target-version" placeholder="例如：1.19.52" value="1.19.52">
+                <small>工具會自動將 manifest.json 內的 <code>min_engine_version</code> 修改為此版本。</small>
+            </div>
+
+            <div class="form-group">
+                <label>上傳 .mcaddon 檔案：</label>
+                <div class="drop-zone" id="drop-zone">
+                    <span class="drop-zone-icon">📁</span>
+                    <p class="drop-zone-text">將 .mcaddon 檔案拖曳至此，或點擊選擇檔案</p>
+                    <input type="file" id="file-input" accept=".mcaddon,.zip,.mcpack">
+                </div>
+            </div>
+
+            <button id="convert-btn" class="btn primary-btn" disabled>轉換並下載</button>
+            <div id="status-message" class="status-message"></div>
+        </main>
+    </div>
+</body>
+</html>
