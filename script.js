@@ -225,15 +225,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // Fix Tynker geometry format mismatch
-            // Tynker often exports 1.8.0 style geometries (keys like "geometry.wither") 
-            // but sets "format_version": "1.12.0", which causes Minecraft to reject them.
-            if (data["format_version"]) {
-                const hasOldGeometryKey = Object.keys(data).some(key => key.startsWith("geometry."));
-                if (hasOldGeometryKey && data["format_version"] !== "1.8.0") {
-                    data["format_version"] = "1.8.0";
-                    modified = true;
+            // Migrate legacy 1.8.0 geometries to modern 1.12.0 format
+            // Minecraft 1.21+ drops support for legacy geometries when min_engine_version is 1.21+
+            // We MUST structurally upgrade the geometry!
+            const legacyGeometryKeys = Object.keys(data).filter(key => key.startsWith("geometry."));
+            if (legacyGeometryKeys.length > 0) {
+                const newGeometries = [];
+                for (const geoKey of legacyGeometryKeys) {
+                    const oldGeo = data[geoKey];
+                    const description = {
+                        identifier: geoKey
+                    };
+                    
+                    // Map legacy texture dimensions
+                    if (oldGeo.texturewidth !== undefined) description.texture_width = oldGeo.texturewidth;
+                    else if (oldGeo.texture_width !== undefined) description.texture_width = oldGeo.texture_width;
+                    
+                    if (oldGeo.textureheight !== undefined) description.texture_height = oldGeo.textureheight;
+                    else if (oldGeo.texture_height !== undefined) description.texture_height = oldGeo.texture_height;
+                    
+                    // Map visible bounds
+                    if (oldGeo.visible_bounds_width !== undefined) description.visible_bounds_width = oldGeo.visible_bounds_width;
+                    if (oldGeo.visible_bounds_height !== undefined) description.visible_bounds_height = oldGeo.visible_bounds_height;
+                    if (oldGeo.visible_bounds_offset !== undefined) description.visible_bounds_offset = oldGeo.visible_bounds_offset;
+
+                    const newGeo = {
+                        description: description,
+                        bones: oldGeo.bones || []
+                    };
+                    
+                    newGeometries.push(newGeo);
+                    delete data[geoKey]; // Remove the old legacy geometry key
                 }
+                
+                data["minecraft:geometry"] = newGeometries;
+                data["format_version"] = "1.12.0";
+                modified = true;
             }
 
             return modified ? JSON.stringify(data, null, 2) : jsonStr;
