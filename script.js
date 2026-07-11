@@ -309,6 +309,8 @@ const dropZone = document.getElementById('drop-zone');
                     modified = true;
                 }
                 
+                const extraGeos = [];
+
                 data["minecraft:geometry"].forEach(geo => {
                     if (geo.description) {
                         if (geo.description.texture_width === undefined) geo.description.texture_width = 64;
@@ -362,7 +364,22 @@ const dropZone = document.getElementById('drop-zone');
                             }
                         });
                     }
+                    
+                    // [大絕招 - 適用於現代模型]
+                    // Tynker 沒有輸出 client_entity，所以系統會退回使用原版設定。
+                    // 而原版 1.21 系統要求模型名稱必須以 .v1.8 結尾。
+                    // 因此我們自動幫這個現代模型建立一個 .v1.8 的分身！
+                    if (geo.description && geo.description.identifier && !geo.description.identifier.endsWith(".v1.8")) {
+                        const duplicateGeo = JSON.parse(JSON.stringify(geo));
+                        duplicateGeo.description.identifier = geo.description.identifier + ".v1.8";
+                        extraGeos.push(duplicateGeo);
+                        modified = true;
+                    }
                 });
+                
+                if (extraGeos.length > 0) {
+                    data["minecraft:geometry"].push(...extraGeos);
+                }
             }
 
             return modified ? JSON.stringify(data, null, 2) : jsonStr;
