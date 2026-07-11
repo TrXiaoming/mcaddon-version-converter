@@ -103,7 +103,34 @@ const dropZone = document.getElementById('drop-zone');
                 let foundClientEntity = false;
                 let foundGeometries = new Set();
 
-                const promises = [];
+                const pngPromises = [];
+                const jsonPromises = [];
+                let imageDimensions = {}; // 儲存 {width, height}
+
+                // Pass 1: 尋找所有 PNG 並讀取標頭取得真實尺寸
+                currentZip.forEach((relativePath, zipEntry) => {
+                    if (!zipEntry.dir && relativePath.endsWith('.png')) {
+                        const p = zipEntry.async("uint8array").then(uint8Array => {
+                            if (uint8Array.length >= 24 && uint8Array[0] === 0x89 && uint8Array[1] === 0x50 && uint8Array[2] === 0x4E && uint8Array[3] === 0x47) {
+                                const view = new DataView(uint8Array.buffer);
+                                const width = view.getUint32(16, false);
+                                const height = view.getUint32(20, false);
+                                
+                                const parts = relativePath.split('/');
+                                const filename = parts[parts.length - 1];
+                                const mobName = filename.replace('.png', '').toLowerCase();
+                                imageDimensions[mobName] = { width, height };
+                                if (typeof logDebug === "function") {
+                                    logDebug(`[PNG 解析] ${mobName}.png 實際尺寸: ${width}x${height}`);
+                                }
+                            }
+                        });
+                        pngPromises.push(p);
+                    }
+                });
+                await Promise.all(pngPromises);
+
+                // Pass 2: 處理 JSON 檔案
                 currentZip.forEach((relativePath, zipEntry) => {
                     if (!zipEntry.dir) {
                         if (relativePath.endsWith('manifest.json')) {
@@ -112,7 +139,7 @@ const dropZone = document.getElementById('drop-zone');
                                 const updatedContent = updateManifest(content, targetVersionArray);
                                 currentZip.file(relativePath, updatedContent);
                             });
-                            promises.push(p);
+                            jsonPromises.push(p);
                         } else if (relativePath.endsWith('.mcpack') || relativePath.endsWith('.zip')) {
                             const p = zipEntry.async("arraybuffer").then(async nestedBuffer => {
                                 const nestedZip = new JSZip();
@@ -121,10 +148,9 @@ const dropZone = document.getElementById('drop-zone');
                                 const newNestedBuffer = await loadedNestedZip.generateAsync({type: "arraybuffer"});
                                 currentZip.file(relativePath, newNestedBuffer);
                             });
-                            promises.push(p);
+                            jsonPromises.push(p);
                         } else if (relativePath.endsWith('.json')) {
                             const p = zipEntry.async("string").then(content => {
-                                // 預先解析檢查是否存在 client_entity 與 geometry
                                 try {
                                     const d = JSON.parse(content);
                                     if (d["minecraft:client_entity"]) foundClientEntity = true;
@@ -137,14 +163,15 @@ const dropZone = document.getElementById('drop-zone');
                                     }
                                 } catch(e) {}
 
-                                const updatedContent = fixTynkerEntityFormat(content, versionStr);
+                                // 將 imageDimensions 傳遞給轉換函數
+                                const updatedContent = fixTynkerEntityFormat(content, versionStr, imageDimensions);
                                 currentZip.file(relativePath, updatedContent);
                             });
-                            promises.push(p);
+                            jsonPromises.push(p);
                         }
                     }
                 });
-                await Promise.all(promises);
+                await Promise.all(jsonPromises);
 
                 // [終極殺手鐧] 如果 Tynker 偷懶沒輸出 client_entity，原版遊戲會拒絕載入任何自訂模型。
                 // 我們必須強行幫它捏造一個完美的 client_entity！
@@ -303,7 +330,7 @@ const dropZone = document.getElementById('drop-zone');
         }
     }
 
-    function fixTynkerEntityFormat(jsonStr, versionStr) {
+    function fixTynkerEntityFormat(jsonStr, versionStr, imageDimensions = {}) {
         try {
             let d = JSON.parse(jsonStr);
             if (d["format_version"]) logDebug("  -> format_version: " + d["format_version"]);
@@ -351,8 +378,14 @@ const dropZone = document.getElementById('drop-zone');
                     const oldGeo = data[geoKey];
                     const description = { identifier: geoKey };
                     
-                    description.texture_width = oldGeo.texturewidth || oldGeo.texture_width || 64;
-                    description.texture_height = oldGeo.textureheight || oldGeo.texture_height || 64;
+                    let mobName = geoKey.replace("geometry.", "").toLowerCase();
+                    if (imageDimensions[mobName]) {
+                        description.texture_width = imageDimensions[mobName].width;
+                        description.texture_height = imageDimensions[mobName].height;
+                    } else {
+                        description.texture_width = oldGeo.texturewidth || oldGeo.texture_width || 64;
+                        description.texture_height = oldGeo.textureheight || oldGeo.texture_height || 64;
+                    }
                     
                     if (oldGeo.visible_bounds_width !== undefined) description.visible_bounds_width = oldGeo.visible_bounds_width;
                     if (oldGeo.visible_bounds_height !== undefined) description.visible_bounds_height = oldGeo.visible_bounds_height;
@@ -391,13 +424,22 @@ const dropZone = document.getElementById('drop-zone');
 
                 data["minecraft:geometry"].forEach(geo => {
                     if (geo.description) {
-                        // [終極破案] 
-                        // Tynker 匯出的模型缺少了 texture_width 和 texture_height 參數。
-                        // 如果不設定，Minecraft 會退回 16x16 導致全身嚴重拉伸破圖 (v2.7 的狀況)。
-                        // 如果錯誤地設定為 64x64，會導致垂直 UV 被壓縮 50%，取樣到錯誤的空白位置 (v2.4 臉不見的狀況)。
-                        // 苦力怕的標準且正確的貼圖尺寸是 64x32！
-                        geo.description.texture_width = geo.description.texture_width || 64;
-                        geo.description.texture_height = geo.description.texture_height || 32;
+                        // [終極破案]
+                        // 自動抓取剛才解析的真實圖片尺寸，無論是鐵魔像 (128x128) 還是苦力怕 (64x32) 都能完美對應！
+                        let mobName = "";
+                        if (geo.description.identifier) {
+                            mobName = geo.description.identifier.replace("geometry.", "").replace(".v1.8", "").toLowerCase();
+                        }
+                        
+                        if (imageDimensions[mobName]) {
+                            geo.description.texture_width = imageDimensions[mobName].width;
+                            geo.description.texture_height = imageDimensions[mobName].height;
+                            modified = true;
+                        } else {
+                            // 萬一沒抓到，如果是苦力怕就給 64x32，其他給 64x64
+                            geo.description.texture_width = geo.description.texture_width || 64;
+                            geo.description.texture_height = geo.description.texture_height || (mobName === 'creeper' ? 32 : 64);
+                        }
                     }
 
                     if (Array.isArray(geo.bones)) {
