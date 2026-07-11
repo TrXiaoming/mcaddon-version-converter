@@ -230,15 +230,79 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // 2. Geometry Format Fix (Revert to 1.8.0)
-            // 配合資源包的 1.16.0 引擎版本，我們強制把舊版模型標記為 1.8.0
-            // 讓 Minecraft 使用最寬容的舊版解析器，這樣 Tynker 產生的負數 size、消失的 UV、錯誤的 parent 通通都會被自動修正或忽略！
-            if (data["format_version"]) {
-                const hasOldGeometryKey = Object.keys(data).some(key => key.startsWith("geometry."));
-                if (hasOldGeometryKey && data["format_version"] !== "1.8.0") {
-                    data["format_version"] = "1.8.0";
+            // 2. Client Entity Fixes
+            // 確保 client_entity 至少為 1.10.0，避免在某些版本中舊版設定被捨棄
+            if (data["minecraft:client_entity"]) {
+                if (!data["format_version"] || data["format_version"] === "1.8.0") {
+                    data["format_version"] = "1.10.0"; 
                     modified = true;
                 }
+            }
+
+            // 3. Migrate legacy 1.8.0 geometries to modern 1.12.0 format
+            const legacyGeometryKeys = Object.keys(data).filter(key => key.startsWith("geometry."));
+            if (legacyGeometryKeys.length > 0) {
+                const newGeometries = [];
+                for (const geoKey of legacyGeometryKeys) {
+                    const oldGeo = data[geoKey];
+                    const description = { identifier: geoKey };
+                    
+                    description.texture_width = oldGeo.texturewidth || oldGeo.texture_width || 64;
+                    description.texture_height = oldGeo.textureheight || oldGeo.texture_height || 64;
+                    
+                    if (oldGeo.visible_bounds_width !== undefined) description.visible_bounds_width = oldGeo.visible_bounds_width;
+                    if (oldGeo.visible_bounds_height !== undefined) description.visible_bounds_height = oldGeo.visible_bounds_height;
+                    if (oldGeo.visible_bounds_offset !== undefined) description.visible_bounds_offset = oldGeo.visible_bounds_offset;
+
+                    newGeometries.push({
+                        description: description,
+                        bones: oldGeo.bones || []
+                    });
+                    delete data[geoKey]; 
+                }
+                
+                data["minecraft:geometry"] = newGeometries;
+                data["format_version"] = "1.12.0";
+                modified = true;
+            }
+
+            // 4. Sanitize all geometries (Fix Tynker's Add Block bugs)
+            if (Array.isArray(data["minecraft:geometry"])) {
+                if (!data["format_version"]) {
+                    data["format_version"] = "1.12.0";
+                    modified = true;
+                }
+                
+                data["minecraft:geometry"].forEach(geo => {
+                    if (geo.description) {
+                        if (geo.description.texture_width === undefined) geo.description.texture_width = 64;
+                        if (geo.description.texture_height === undefined) geo.description.texture_height = 64;
+                    }
+
+                    if (Array.isArray(geo.bones)) {
+                        geo.bones.forEach(bone => {
+                            if (Array.isArray(bone.cubes)) {
+                                bone.cubes.forEach(cube => {
+                                    if (cube.uv === undefined) {
+                                        cube.uv = [0, 0];
+                                        modified = true;
+                                    }
+                                    if (Array.isArray(cube.size)) {
+                                        for (let i = 0; i < 3; i++) {
+                                            if (cube.size[i] < 0) {
+                                                if (Array.isArray(cube.origin)) {
+                                                    cube.origin[i] += cube.size[i];
+                                                }
+                                                cube.size[i] = Math.abs(cube.size[i]);
+                                                modified = true;
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
             }
 
             return modified ? JSON.stringify(data, null, 2) : jsonStr;
