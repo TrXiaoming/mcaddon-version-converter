@@ -112,6 +112,9 @@ const dropZone = document.getElementById('drop-zone');
 
                 // Pass 1: 尋找所有 PNG 並讀取標頭取得真實尺寸
                 currentZip.forEach((relativePath, zipEntry) => {
+                    if (typeof logDebug === "function" && !zipEntry.dir) {
+                        logDebug(`[檔案清單] 找到檔案: ${relativePath}`);
+                    }
                     if (!zipEntry.dir && relativePath.endsWith('.png')) {
                         const p = zipEntry.async("uint8array").then(uint8Array => {
                             if (uint8Array.length >= 24 && uint8Array[0] === 0x89 && uint8Array[1] === 0x50 && uint8Array[2] === 0x4E && uint8Array[3] === 0x47) {
