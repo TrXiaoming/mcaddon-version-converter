@@ -225,6 +225,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
+            // Fix Tynker geometry format mismatch
+            // Tynker often exports 1.8.0 style geometries (keys like "geometry.wither") 
+            // but sets "format_version": "1.12.0", which causes Minecraft to reject them.
+            if (data["format_version"]) {
+                const hasOldGeometryKey = Object.keys(data).some(key => key.startsWith("geometry."));
+                if (hasOldGeometryKey && data["format_version"] !== "1.8.0") {
+                    data["format_version"] = "1.8.0";
+                    modified = true;
+                }
+            }
+
             return modified ? JSON.stringify(data, null, 2) : jsonStr;
         } catch (e) {
             // Ignore non-JSON or malformed files
