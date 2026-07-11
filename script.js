@@ -175,9 +175,22 @@ document.addEventListener('DOMContentLoaded', () => {
             let manifest = JSON.parse(manifestStr);
             let modified = false;
 
+            let isResourcePack = false;
+            if (manifest.modules && Array.isArray(manifest.modules)) {
+                isResourcePack = manifest.modules.some(mod => mod.type === "resources");
+            }
+
             // Update header.min_engine_version
             if (manifest.header) {
-                manifest.header.min_engine_version = targetVersionArray;
+                if (isResourcePack) {
+                    // [終極解法] Tynker 的資源包 (Resource Pack) 充滿了舊版 1.8.0 的模型與渲染語法。
+                    // 如果我們把資源包的引擎版本升級到 1.21+，Minecraft 會啟動「嚴格模式」並徹底禁用舊版渲染，導致自訂模型完全失效。
+                    // 將資源包設定為 1.16.0，既能被新版教育版接受，又能觸發 Minecraft 的「舊版寬容解析器」，自動包容 Tynker 產生的錯誤模型！
+                    manifest.header.min_engine_version = [1, 16, 0];
+                } else {
+                    // 行為包 (Behavior Pack) 必須升級到最新版，才能正確覆寫原版生物的 AI 與行為。
+                    manifest.header.min_engine_version = targetVersionArray;
+                }
                 modified = true;
             }
             
@@ -187,9 +200,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 modified = true;
             }
             
-            // Note: We avoid changing module versions or UUIDs, to minimize the chance of breaking the addon.
-            // min_engine_version is the most critical field for Minecraft Education compatibility.
-
             return modified ? JSON.stringify(manifest, null, 2) : manifestStr;
         } catch (e) {
             console.error("解析 manifest.json 失敗", e);
@@ -202,22 +212,17 @@ document.addEventListener('DOMContentLoaded', () => {
             let data = JSON.parse(jsonStr);
             let modified = false;
 
-            // Only apply format_version fixes to behavior pack entities.
-            // DO NOT touch geometry, animations, or client_entity files, as their schema strictly depends on format_version.
+            // 1. Behavior Pack Entity Fixes
             if (data["minecraft:entity"]) {
-                // Tynker bug: format_version is placed inside minecraft:entity instead of root
                 if (data["minecraft:entity"]["format_version"]) {
                     data["format_version"] = versionStr;
                     delete data["minecraft:entity"]["format_version"];
                     modified = true;
                 }
 
-                // If it's a behavior entity override and uses an old format, update it to the target version
-                // so Minecraft doesn't reject it as a legacy override
                 if (data["format_version"]) {
                     const fv = data["format_version"];
                     const parts = fv.split('.').map(Number);
-                    // Properly compare versions (e.g. 1.8.0 vs 1.16.0)
                     if (parts.length >= 2 && (parts[0] < 1 || (parts[0] === 1 && parts[1] < 16))) {
                         data["format_version"] = versionStr;
                         modified = true;
@@ -225,75 +230,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // 2. Migrate legacy 1.8.0 geometries to modern 1.12.0 format
-            const legacyGeometryKeys = Object.keys(data).filter(key => key.startsWith("geometry."));
-            if (legacyGeometryKeys.length > 0) {
-                const newGeometries = [];
-                for (const geoKey of legacyGeometryKeys) {
-                    const oldGeo = data[geoKey];
-                    const description = {
-                        identifier: geoKey
-                    };
-                    
-                    // Map legacy texture dimensions safely
-                    description.texture_width = oldGeo.texturewidth || oldGeo.texture_width || 64;
-                    description.texture_height = oldGeo.textureheight || oldGeo.texture_height || 64;
-                    
-                    // Map visible bounds
-                    if (oldGeo.visible_bounds_width !== undefined) description.visible_bounds_width = oldGeo.visible_bounds_width;
-                    if (oldGeo.visible_bounds_height !== undefined) description.visible_bounds_height = oldGeo.visible_bounds_height;
-                    if (oldGeo.visible_bounds_offset !== undefined) description.visible_bounds_offset = oldGeo.visible_bounds_offset;
-
-                    const newGeo = {
-                        description: description,
-                        bones: oldGeo.bones || []
-                    };
-                    
-                    newGeometries.push(newGeo);
-                    delete data[geoKey]; // Remove the old legacy geometry key
+            // 2. Geometry Format Fix (Revert to 1.8.0)
+            // 配合資源包的 1.16.0 引擎版本，我們強制把舊版模型標記為 1.8.0
+            // 讓 Minecraft 使用最寬容的舊版解析器，這樣 Tynker 產生的負數 size、消失的 UV、錯誤的 parent 通通都會被自動修正或忽略！
+            if (data["format_version"]) {
+                const hasOldGeometryKey = Object.keys(data).some(key => key.startsWith("geometry."));
+                if (hasOldGeometryKey && data["format_version"] !== "1.8.0") {
+                    data["format_version"] = "1.8.0";
+                    modified = true;
                 }
-                
-                data["minecraft:geometry"] = newGeometries;
-                data["format_version"] = "1.12.0";
-                modified = true;
-            }
-
-            // 3. Sanitize all geometries (modern or newly migrated) for strict 1.21+ validation
-            if (Array.isArray(data["minecraft:geometry"])) {
-                data["minecraft:geometry"].forEach(geo => {
-                    // Ensure texture dimensions exist
-                    if (geo.description) {
-                        if (geo.description.texture_width === undefined) geo.description.texture_width = 64;
-                        if (geo.description.texture_height === undefined) geo.description.texture_height = 64;
-                    }
-
-                    if (Array.isArray(geo.bones)) {
-                        geo.bones.forEach(bone => {
-                            if (Array.isArray(bone.cubes)) {
-                                bone.cubes.forEach(cube => {
-                                    // Fix missing uv (Tynker bug when adding new blocks)
-                                    if (cube.uv === undefined) {
-                                        cube.uv = [0, 0];
-                                        modified = true;
-                                    }
-                                    // Fix negative sizes (Tynker bug when dragging blocks inversely)
-                                    // Minecraft 1.21 strictly rejects geometries with negative sizes
-                                    if (Array.isArray(cube.size)) {
-                                        for (let i = 0; i < 3; i++) {
-                                            if (cube.size[i] < 0) {
-                                                if (Array.isArray(cube.origin)) {
-                                                    cube.origin[i] += cube.size[i];
-                                                }
-                                                cube.size[i] = Math.abs(cube.size[i]);
-                                                modified = true;
-                                            }
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    }
-                });
             }
 
             return modified ? JSON.stringify(data, null, 2) : jsonStr;
