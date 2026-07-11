@@ -73,6 +73,9 @@ const dropZone = document.getElementById('drop-zone');
 
     convertBtn.addEventListener('click', async () => {
         if (!selectedFile) return;
+        
+        const logContainer = document.getElementById("debug-log");
+        if (logContainer) logContainer.innerHTML = "";
 
         const versionStr = targetVersionInput.value.trim();
         const versionMatch = versionStr.match(/^(\d+)\.(\d+)\.(\d+)$/);
@@ -188,7 +191,7 @@ const dropZone = document.getElementById('drop-zone');
                                 texturePath = relPath.replace('.png', '');
                                 
                                 // [Debug 功能] 將貼圖抽出來顯示在網頁上，讓使用者親眼確認 Tynker 是否裁切了貼圖！
-                                promises.push(entry.async("base64").then(base64Data => {
+                                entry.async("base64").then(base64Data => {
                                     const imgDataUrl = "data:image/png;base64," + base64Data;
                                     const img = new Image();
                                     img.src = imgDataUrl;
@@ -205,7 +208,7 @@ const dropZone = document.getElementById('drop-zone');
                                         logContainer.appendChild(msg);
                                         logContainer.appendChild(img);
                                     }
-                                }));
+                                }).catch(e => console.error(e));
                             }
                         });
 
@@ -382,6 +385,10 @@ const dropZone = document.getElementById('drop-zone');
                     if (imageDimensions[mobName]) {
                         description.texture_width = imageDimensions[mobName].width;
                         description.texture_height = imageDimensions[mobName].height;
+                    } else if (Object.keys(imageDimensions).length === 1) {
+                        const onlyKey = Object.keys(imageDimensions)[0];
+                        description.texture_width = imageDimensions[onlyKey].width;
+                        description.texture_height = imageDimensions[onlyKey].height;
                     } else {
                         description.texture_width = oldGeo.texturewidth || oldGeo.texture_width || 64;
                         description.texture_height = oldGeo.textureheight || oldGeo.texture_height || 64;
@@ -435,8 +442,15 @@ const dropZone = document.getElementById('drop-zone');
                             geo.description.texture_width = imageDimensions[mobName].width;
                             geo.description.texture_height = imageDimensions[mobName].height;
                             modified = true;
+                        } else if (Object.keys(imageDimensions).length === 1) {
+                            // [終極無腦配對] 如果 Tynker 亂塞 geometry ID (例如 Agent 卻用 geometry.creeper)，
+                            // 導致名稱對不起來，但整個包只有一張 PNG，那我們就強制套用這唯一一張 PNG 的尺寸！
+                            const onlyKey = Object.keys(imageDimensions)[0];
+                            geo.description.texture_width = imageDimensions[onlyKey].width;
+                            geo.description.texture_height = imageDimensions[onlyKey].height;
+                            modified = true;
                         } else {
-                            // 萬一沒抓到，如果是苦力怕就給 64x32，其他給 64x64
+                            // 萬一真的抓不到，如果是苦力怕就給 64x32，其他給 64x64
                             geo.description.texture_width = geo.description.texture_width || 64;
                             geo.description.texture_height = geo.description.texture_height || (mobName === 'creeper' ? 32 : 64);
                         }
