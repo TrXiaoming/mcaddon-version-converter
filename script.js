@@ -159,6 +159,26 @@ const dropZone = document.getElementById('drop-zone');
                         currentZip.forEach((relPath, entry) => {
                             if (relPath.endsWith('.png') && relPath.toLowerCase().includes(name.toLowerCase())) {
                                 texturePath = relPath.replace('.png', '');
+                                
+                                // [Debug 功能] 將貼圖抽出來顯示在網頁上，讓使用者親眼確認 Tynker 是否裁切了貼圖！
+                                promises.push(entry.async("base64").then(base64Data => {
+                                    const imgDataUrl = "data:image/png;base64," + base64Data;
+                                    const img = new Image();
+                                    img.src = imgDataUrl;
+                                    img.style.maxWidth = "100%";
+                                    img.style.border = "2px solid red";
+                                    img.style.marginTop = "10px";
+                                    img.style.imageRendering = "pixelated"; // 保持像素風格
+                                    
+                                    const logContainer = document.getElementById("debug-log");
+                                    if (logContainer) {
+                                        const msg = document.createElement("div");
+                                        msg.style.color = "yellow";
+                                        msg.innerHTML = `<br><strong>⚠️ [貼圖原始檔檢視] 這是 Tynker 真正匯出的圖片：</strong><br>如果您發現這張圖沒有苦力怕的臉，或者高度只有 32 像素（下半部被切掉），代表 Tynker 在匯出時物理性地把您畫的臉刪除了，這是 Tynker 的匯出 Bug，無法透過轉換器救回。`;
+                                        logContainer.appendChild(msg);
+                                        logContainer.appendChild(img);
+                                    }
+                                }));
                             }
                         });
 
